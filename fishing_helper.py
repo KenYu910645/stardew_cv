@@ -1,6 +1,6 @@
 import time
 # Computer vision
-from PIL import ImageGrab
+from PIL import ImageGrab, Image
 import cv2
 import numpy as np
 import pydirectinput
@@ -12,10 +12,25 @@ import sys
 GAME_TITLE = 'stardew valley' # windows title must cantain these characters
 IS_RUN = True
 SCREENS_CAP = None
-# Color range
-NUM_HSV_LO = (20, 150, 0) # Green number on mini-map
-NUM_HSV_UP = (40, 255, 255)
 CONFIENT_THRES = 0.5
+DEBUG = True# False 
+
+STATE = 'casting' # 'unknown'
+ALLOW_CAST = True
+UNKNOW_ALIVE_TIME = 2 # sec
+# Color range
+THRES_BROWN_UP = (50, 255, 255)
+THRES_BROWN_LO = (0, 200, 100)
+THRES_BROWN = 340
+# THRES_BAR_UP = (55, 255, 255)
+# THRES_BAR_LO = (50, 230, 200)
+THRES_BAR_UP = (65, 255, 255)
+THRES_BAR_LO = (40, 150, 150)
+THRES_FISH_UP = (40, 255, 255)
+THRES_FISH_UP = (0, 200, 100)
+# Global variable 
+LAST_HSV = Image.new("RGB", (25, 40), (0, 0, 0))
+T_ENTER_UNKNOWN = time.time()
 
 WIN_LIST = []
 def enum_cb(hwnd, results):
@@ -45,7 +60,8 @@ def remove_isolated_pixels(image):
     return new_image
 
 def main():
-    global SCREENS_CAP, IMG_EX
+    global SCREENS_CAP, IMG_EX, LAST_HSV, STATE, UNKNOW_ALIVE_TIME, T_ENTER_UNKNOWN
+    brown_mask = None 
     if SCREENS_CAP == None:
         # wait for the program to start initially.
         win32gui.EnumWindows(enum_cb, WIN_LIST)
@@ -67,30 +83,96 @@ def main():
     if SCREENS_CAP != None:
         # Resize 
         img_resize = cv2.resize(img_window, (512, 512), interpolation=cv2.INTER_AREA)
-        # img_exclamation = img_resize[160:200, 245:270]
-        img_exclamation = img_resize[100:250, 200:320]
-        img_hsv = cv2.cvtColor(img_exclamation, cv2.COLOR_RGB2HSV)
 
-        # Mask 
-        mask = cv2.inRange(img_hsv, NUM_HSV_LO, NUM_HSV_UP)
-        remove_isolated_pixels(mask)
+        if STATE == 'unknown':
+            ########################
+            ### Find Message Box ###
+            ########################
+            img_msg_box = img_resize[110:200, 215:295]
+            brown_mask = cv2.inRange(cv2.cvtColor(img_msg_box, cv2.COLOR_RGB2HSV), THRES_BROWN_LO, THRES_BROWN_UP)
+            # Matching with exclamation images
+            res = cv2.matchTemplate(brown_mask, IMG_BOX, cv2.TM_CCOEFF_NORMED )
+            max_cof = np.amax(res)
+            if max_cof > CONFIENT_THRES:
+                pydirectinput.press('c')
+                print("I saw a msg box(" + (str(max_cof)) + "), pressed 'c'")
+                STATE = 'casting'
+            # Keepalive 
+            # if (time.time() - T_ENTER_UNKNOWN) > UNKNOW_ALIVE_TIME:
+            #     print("Need to keep alive.")
+            #     STATE = 'casting'
         
-        # Matching with exclamation images
-        res = cv2.matchTemplate(mask, IMG_EX, cv2.TM_CCOEFF_NORMED )
-        max_cof = np.amax(res)
-        if max_cof > CONFIENT_THRES:
-            pydirectinput.press('c')
-            print("Get fish! (" + str(max_cof) + ")")
+        elif STATE == 'casting':
+            if ALLOW_CAST:
+                print("Casting")
+                pydirectinput.keyDown('c')
+                time.sleep(0.9)
+                pydirectinput.keyUp('c')
+            STATE = 'baiting'
         
-        # img_window
-        # cv2.imshow('mask', mask)
-        # cv2.imshow('window',cv2.cvtColor(img_resize, cv2.COLOR_BGR2RGB))
-        # cv2.imshow('img_exclamation',cv2.cvtColor(img_exclamation, cv2.COLOR_BGR2RGB))
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            IS_RUN = False
+        elif STATE == 'baiting':
+            ########################
+            ### Find Exclamation ###
+            ########################
+            img_exclamation = img_resize[180:220, 245:270]
+            img_hsv = cv2.cvtColor(img_exclamation, cv2.COLOR_RGB2HSV)
+            # Get differ
+            diff_hsv = img_hsv - LAST_HSV
+            # Matching with exclamation images
+            ret, mask_ex = cv2.threshold(cv2.split(diff_hsv)[-1] ,25,255,cv2.THRESH_BINARY)
+            res = cv2.matchTemplate(mask_ex, IMG_EX, cv2.TM_CCOEFF_NORMED )
+            max_cof = np.amax(res)
+            if max_cof > CONFIENT_THRES:
+                pydirectinput.press('c')
+                print("Get fish! (" + str(max_cof) + ")")
+                T_ENTER_UNKNOWN = time.time()
+                STATE = "unknown"
+            # Post-process
+            LAST_HSV = img_hsv
+        # elif STATE == 'fishing':
+        # img_fish = img_resize[80:380, 190:240]
+        # bar_mask = cv2.inRange(cv2.cvtColor(img_fish, cv2.COLOR_RGB2HSV), THRES_BAR_LO, THRES_BAR_UP)
+        # res = cv2.matchTemplate(bar_mask, IMG_BAR, cv2.TM_CCOEFF_NORMED )
+        # max_cof = np.amax(res)
+        # if max_cof > CONFIENT_THRES:
+        #     pydirectinput.press('c')
+        #     print("Get bar")
+        #     STATE = "fishing"
+
+        if DEBUG:
+            try:
+                cv2.imshow('brown_mask', brown_mask)
+            except:
+                pass
+            # try:
+            #     cv2.imshow('bar_mask', bar_mask)
+            # except:
+            #     pass
+            # try:
+            #     cv2.imshow('img_fish', img_fish)
+            # except:
+            #     pass
+            try: 
+                cv2.imshow('mask_ex',cv2.cvtColor(mask_ex, cv2.COLOR_BGR2RGB))
+            except: 
+                pass
+
+            cv2.imshow('window',cv2.cvtColor(img_resize, cv2.COLOR_BGR2RGB))
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                IS_RUN = False
+            #     cv2.imshow('mask_ex', mask_ex)
+            #     cv2.imshow('brown_mask', brown_mask)
+            #     # cv2.imshow('diff_hsv', diff_hsv)
+            #     cv2.imshow("img_msg_box", img_msg_box)
+            #     cv2.imshow('window',cv2.cvtColor(img_resize, cv2.COLOR_BGR2RGB))
+            #     cv2.imshow('img_exclamation',cv2.cvtColor(img_exclamation, cv2.COLOR_BGR2RGB))
+            #     if cv2.waitKey(1) & 0xFF == ord('q'):
+            #         IS_RUN = False
 
 if __name__ == '__main__':
     IMG_EX = cv2.imread("exclamation.png" ,cv2.IMREAD_GRAYSCALE)
+    IMG_BOX = cv2.imread("msg_box.png" ,cv2.IMREAD_GRAYSCALE)
+    IMG_BAR = cv2.imread("bar.png" ,cv2.IMREAD_GRAYSCALE)
     while IS_RUN:
         main()
         time.sleep(0.1)
