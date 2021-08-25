@@ -8,7 +8,7 @@ while(True):
     pydirectinput.keyUp('a')
     time.sleep(1)
 
-    print("Pressing 'a'")
+    print("Pressing 'd'")
     pydirectinput.keyDown('d')
     time.sleep(1.5)
     pydirectinput.keyUp('d')
